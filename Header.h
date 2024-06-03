@@ -6,7 +6,10 @@
 // 
 // *******
 // 更新日志：202-5-22  
-//			 增加期货品种排序;核对平仓盈亏逐笔的统计方法
+//			 1.增加期货品种排序,map内部本身就是按序存储的（比如红黑树），这样方便实现快速查找。
+//             在插入<key, value>键值对时，map就会自动按照key的大小顺序进行存储。因而作为key的类型必须能够进行大小运算的比较。
+//			 2.核对平仓盈亏逐笔的统计方法；
+//           3.github仓库：https://github.com/SamSmithchina/qingsuan.git
 // 更新日志：202 - 3 - 21
 // 
 // 程序将会读取交易数据，自动计算全部品种、全部合约的持仓盈亏与成交逐笔盈亏。
@@ -412,6 +415,8 @@ string GetTime()
 	strTime.append(to_string(i));
 	strTime.append("_");
 	i = p.tm_mday;
+	if (i < 10)
+		strTime.append("0");
 	strTime.append(to_string(i));
 	//cout << "当前时间 ： " << strTime << endl;
 	return strTime;
@@ -428,13 +433,13 @@ vector<string>  SearchCSVFile(string strFile)
 	int iFlag = -1;
 	char cwd[256];
 	_getcwd(cwd, 256);
-	string strTempDir = cwd;		//执行程序当前路径；
+	string strTempDir = cwd;			//执行程序当前路径；
 	strTempDir.append("\\*");
 
 	const string strFileType = ".csv";	//指定文件类型
-	long   hFile = 0;				// 文件句柄
-	vector<string> vecFiles;		//存储符合的文件；
-	struct _finddata_t fileinfo;	//文件信息
+	long   hFile = 0;					// 文件句柄
+	vector<string> vecFiles;			//存储符合的文件；
+	struct _finddata_t fileinfo;		//文件信息
 	string strTime;
 	string strTempFile;
 	string strPath;
@@ -444,15 +449,16 @@ vector<string>  SearchCSVFile(string strFile)
 	{
 		do {
 			strTempFile = fileinfo.name;
-			strTime = GetTime();				//文件名字格式如“实时持仓_2023_03_21-15_28_49.csv”
-			if (strTempFile.find(strFile) != string::npos			//按关键字和csv格式寻找文件
-				&& strTempFile.find(strTime) != string::npos
-				&& strTempFile.find(strFileType) != string::npos)
+			if (strTempFile.find(strFile) != string::npos)
 			{
-				strPath = cwd;
-				vecFiles.push_back(strPath.append("\\").append(strTempFile));
+				strTime = GetTime();							//文件名字格式如“实时持仓_2023_03_21-15_28_49.csv”
+				if (strTempFile.find(strTime) != string::npos  //按关键字和csv格式寻找文件
+					&& strTempFile.find(strFileType) != string::npos)
+				{
+					strPath = cwd;
+					vecFiles.push_back(strPath.append("\\").append(strTempFile));
+				}
 			}
-
 
 		} while (_findnext(hFile, &fileinfo) == 0);  //寻找下一个，成功返回0，否则-1
 		_findclose(hFile);		//close
@@ -522,6 +528,7 @@ int HlodingCSVFileRead(vector<HOLDING> &Holding, string strFile)
 }
 
 
+
 //输入：map<string,float> 结构的<品种,逐笔盈亏>， 
 //      账户唯一账号 strInvestorID,源文件 strFile 计算结果输出文件strResultFile；
 //      计算结果写入指定文件平仓盈亏逐笔.txt
@@ -539,6 +546,8 @@ int ResaultToTXT(map<string, float> mapArr, string strInvestorID, string strFile
 	bool bFlag = false;
 	const string str1 = "---------------------------------";
 	const string str2 = "                                 ";
+	
+	//期货品种按英文字母A - Z顺序排序
 	map<string, float>::iterator mapIt = mapArr.begin();
 	string strTemp = strFile.substr(strFile.rfind('\\') + 1, strFile.npos);
 	of << strTemp << "  统计如下：" << endl;
@@ -740,14 +749,18 @@ int TickByTickTransactionProfits(vector<TRANSACTION> vTrans, string strFile)
 
 		//取得取货合约
 		cConstraction = transIt->GetFuturesConstractsName();
-
+		
 		//取得期货平仓逐笔盈亏
 		fProfits = transIt->GetTickByTickClosdProfits();
 
-		for (i = 0; i <(int)strlen(cConstraction); i++)
+		for (i = 0; cConstraction[i] != '\0' ; i++)
 		{
-			//if (cConstraction[i] >= 97 && cConstraction[i] <= 122			//97 是小写a ，122是小写z
-			//	|| cConstraction[i] >= 65 && cConstraction[i] <= 90)		//65是大写A ， 90是大写Z
+			//将期货合约统一为大写字母表示
+			if (cConstraction[i] >= 97 && cConstraction[i] <= 122)			//97 是小写a ，122是小写z
+			{
+				//	|| cConstraction[i] >= 65 && cConstraction[i] <= 90)	//65是大写A ， 90是大写Z
+				cConstraction[i] -= 32;										//小写字母转大写字母，
+			}
 			if (cConstraction[i]>57 || cConstraction[i] < 48)				//48是数字0, 57是数字9
 			{
 				if (bOption == false && bNumber == false)					//是期货还是期权
@@ -804,10 +817,11 @@ int TickByTickTransactionProfits(vector<TRANSACTION> vTrans, string strFile)
 // 程序版权 、责任声明
 void Notification()
 {
-	cout << "************************************************************" << endl
+	cout << "************************************************************" << endl << endl
 		<< " 本软件为非盈利性程序，代码开源，公开版权，遵守Apache Lience\\BSD规范，仅供学习参考。" << endl
 		<< " 开发人员 Sam Smith ，" << endl
 		<< " email :sam-nuaa@nuaa.edu.cn" << endl
+		<< " github仓库：https://github.com/SamSmithchina/qingsuan.git" << endl
 		<< " 使用说明：" << endl
 		<< " 1.交易员请在无限易中将“实时持仓”、“成交汇总”两栏文件导出到本地，" << endl
 		<< "   文件名为 名字+时间+序号.scv" << endl
@@ -818,7 +832,8 @@ void Notification()
 		<< " 4.程序只计算今天日期文件，请定期清除旧日期文件，" << endl
 		<< " 5.程序根据“持仓浮动盈亏”、“平仓逐笔盈亏”，自动完成清算，请按任意键退出程序，" << endl
 		<< " 6.目录下生成清算结果“持仓浮动盈亏.txt”、“平仓逐笔盈亏.txt”。" << endl << endl
-		<< "   当本程序运行异常，请关闭程序，关闭相关文件，然后重启程序" << endl
+		<< " 7.当本程序运行异常，请关闭程序，关闭相关文件，然后重启程序" << endl << endl
+		<< "************************************************************" << endl
 		<< endl << endl << endl << endl << endl;
 
 	long   hFile = 0;				// 文件句柄
@@ -833,10 +848,11 @@ void Notification()
 			cout << "Notification error" << endl;
 		}
 
-		of << "************************************************************" << endl
+		of << "************************************************************" << endl << endl
 			<< " 本软件为非盈利性程序，代码开源，公开版权，遵守Apache Lience\\BSD规范，仅供学习参考。" << endl
 			<< " 开发人员 Sam Smith ，" << endl
 			<< " email :sam-nuaa@nuaa.edu.cn" << endl
+			<< " github仓库：https://github.com/SamSmithchina/qingsuan.git" << endl
 			<< " 使用说明：" << endl
 			<< " 1.交易员请在无限易中将“实时持仓”、“成交汇总”两栏文件导出到本地，" << endl
 			<< "   文件名为 名字+时间+序号.scv" << endl
@@ -847,7 +863,8 @@ void Notification()
 			<< " 4.程序只计算今天日期文件，请定期清除旧日期文件，" << endl
 			<< " 5.程序根据“持仓浮动盈亏”、“平仓逐笔盈亏”，自动完成清算，请按任意键退出程序，" << endl
 			<< " 6.目录下生成清算结果“持仓浮动盈亏.txt”、“平仓逐笔盈亏.txt”。" << endl << endl
-			<< "   当本程序运行异常，请关闭程序，关闭相关文件，然后重启程序" << endl;
+			<< " 7.当本程序运行异常，请关闭程序，关闭相关文件，然后重启程序" << endl << endl
+			<< "************************************************************" << endl;
 		of.close();
 	}
 }
