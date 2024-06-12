@@ -20,16 +20,7 @@
 // 本软件为非盈利性程序，代码开源，公开版权，遵守Apache Lience\BSD规范，仅供学习参考。
 // 开发人员 Sam Smith ，
 // email :sam-nuaa@nuaa.edu.cn
-// 使用说明：
-// 1.交易员请在无限易中将“实时持仓”、“成交汇总”两栏文件导出到本地，
-//   文件名为 名字+时间+序号.scv
-//   格式如“实时持仓_2024_05_25-15_28_60.csv”,
-//         “成交汇总_2024_05_25-15_28_46.csv”
-// 2.数据文件保存或者拷贝到“日结清算.exe”所在目录下，
-// 3.点击“日结清算.exe”程序，
-// 4.程序只计算今天日期文件，请定期清除旧日期文件，
-// 5.程序根据“持仓浮动盈亏”、“平仓逐笔盈亏”，自动完成清算，请按任意键退出程序，
-// 6.目录下生成清算结果“持仓浮动盈亏.txt”、“平仓逐笔盈亏.txt”。
+
 
 
 
@@ -50,6 +41,7 @@
 #include <map>
 #include <iomanip>
 #include <codecvt>
+
 using namespace std;
 
 
@@ -464,19 +456,6 @@ vector<string>  SearchCSVFile(string strFile)
 		_findclose(hFile);		//close
 	}
 
-	if (vecFiles.size() == 0)		//没有文件
-	{
-		std::cout << "SearchCSVFile() 没有找到 "
-			<< strFile << "_" << strTime << strFileType
-			<< " 文件" << endl;
-	}
-	else
-	{
-		for (int i = 0; i < (int)vecFiles.size(); i++)
-		{
-			cout << "找到文件 " << vecFiles[i] << endl;
-		}
-	}
 	return vecFiles;
 }
 
@@ -527,11 +506,302 @@ int HlodingCSVFileRead(vector<HOLDING> &Holding, string strFile)
 
 }
 
+//输入 ：  map<pair<string, string>, pair<float, string>> mapHolding,
+//功能 ：  计算每个投资者账户下的全部持仓浮动盈亏，在mapHolding中插入<投资者、“全部”、flaot浮动盈亏，string 文件名字>
+//输出 ：  mapHolding
+map<pair<string, string>, pair<float, string>> TotalMapHoling(map<pair<string, string>, pair<float, string>> mapHolding)
+{
+	map<pair<string, string>, pair<float, string>>::iterator itMap;
+	map<pair<string, string>, pair<float, string>>::iterator itMapNext;
+	float fTotal = 0;
+	float fTemp = 0;
+	itMap = mapHolding.begin();
+	itMapNext = itMap;
 
+	for (itMap; itMap != mapHolding.end(); itMap++)
+	{
+		fTemp = itMap->second.first;
+		fTotal += fTemp;
+		//获取下一个指针
+		itMapNext = ++itMap;		
+		itMap--;
+		if (itMapNext == mapHolding.end())
+		{
+			mapHolding.insert(make_pair(make_pair(itMap->first.first, "全部"), make_pair(fTotal, itMap->second.second)));
+		}
+		else if (itMapNext != mapHolding.end())
+		{
+			if (itMapNext->first.first != itMap->first.first)
+				mapHolding.insert(make_pair(make_pair(itMap->first.first, "全部"), make_pair(fTotal, itMap->second.second)));
+		}
+	}
+
+	return mapHolding;
+}
+
+//输入： map<pair<string, string>, pair<float, string>> mapTranscation,
+//		 map<pair<string, string>, pair<float, string>> mapHolding,
+//功能： 合并两个map,
+//输出： 合并后的map,按照<<投资者，期货代码名称>，<平仓盈亏，持仓盈亏>>，按<投资者,期货代码>分类正序排序，
+map<pair< string, string >, pair< float, float >> MergeMap(
+	map<pair<string, string>, pair<float, string>> mapTranscation,
+	map<pair<string, string>, pair<float, string>> mapHolding)
+{
+	//记录最终结果的map
+	map<pair<string, string>, pair<float, float>> mapResult;
+	//迭代器
+	map<pair<string, string>, pair<float, string>>::iterator mapTransIt;
+	map<pair<string, string>, pair<float, string>>::iterator mapHoldingIt;
+
+	//处理持仓盈亏总量
+	mapHolding = TotalMapHoling(mapHolding);
+
+	//先处理mapTranscation
+	for (mapTransIt = mapTranscation.begin(); mapTransIt != mapTranscation.end(); mapTransIt++)
+	{
+		//查找对用投资者账户特定品种代码的浮动盈亏
+		mapHoldingIt = mapHolding.find(mapTransIt->first);
+		//有投资者账户特定品种代码下的浮动盈亏和平仓盈亏
+		if (mapHoldingIt != mapHolding.end())
+		{
+			//存储结果
+			mapResult.insert(make_pair(mapTransIt->first, make_pair(mapTransIt->second.first, mapHoldingIt->second.first)));
+		}
+		// 持仓浮动盈亏 = 0，只有平仓盈亏
+		else
+		{
+			//存储结果
+			mapResult.insert(make_pair(mapTransIt->first, make_pair(mapTransIt->second.first, 0)));
+		}
+
+	}
+	//处理完成平仓盈亏，处理剩下的持仓浮动盈亏
+	for (mapHoldingIt = mapHolding.begin(); mapHoldingIt != mapHolding.end(); mapHoldingIt++)
+	{
+		//查找对用投资者账户特定品种代码的平仓
+		mapTransIt = mapTranscation.find(mapHoldingIt->first);
+		//有投资者账户特定品种代码下的浮动盈亏和平仓盈亏,在前面已经处理完成；
+		if (mapTransIt != mapTranscation.end())
+			continue;	//直接跳过不用处理
+		else
+		{
+			//存储结果
+			// 只有持仓浮动盈亏，平仓盈亏= 0
+			mapResult.insert(make_pair(mapHoldingIt->first, make_pair(0, mapHoldingIt->second.first)));
+		}
+	}
+
+
+	return mapResult;
+}
+
+//输入：存储读文件结果的数组mapArr;<string 账户名，string 期货合约代码 ， float 平仓盈亏逐笔统计，float 浮动盈亏>
+//      源文件 strFile 计算结果输出文件strResultFile；
+//功能：计算结果写入指定文件 平仓盈亏逐笔.txt
+//输出：0 正常写，-1 异常
+int ElasticityTotalResaultToTXT(
+	map<pair< string, string >, pair< float, float >> mergeMap,
+	string strResultFile)
+{
+	ofstream of;
+	of.open(strResultFile, ofstream::app);
+	if (!of.is_open())
+	{
+		cout << "打开" << strResultFile << "文件失败！\n 请关闭其他正在使用该文件的程序" << endl;
+		return -1;
+	}
+
+	//合并
+
+	//bool bFlag = false;
+	const string str1 = "------------------------------------------------------";
+	const string str2 = "                                                      ";
+	string str3 = "";
+	//期货品种按英文字母A - Z顺序排序,
+	map<pair<string, string>, pair<float, float>>::iterator mapIt = mergeMap.begin();
+	string strInvestorID = "";
+	string strFrontInvestorID = "";
+	string strConstractsName = "";
+	float fProFitsLossOFFloating = 0;
+	float ffTickByTickClosdProfits;
+
+
+	while (mapIt != mergeMap.end())
+	{
+		//文件名
+
+		//投资者账户
+		strInvestorID = mapIt->first.first;
+		if (strFrontInvestorID != strInvestorID)
+		{
+			/*
+			of << endl << strFile << "  统计如下：" << endl;
+			cout << endl << strFile << "  统计如下：" << endl;
+			*/
+
+			of << endl << "账号   " << strInvestorID << endl
+				<< "|" << str1 << "|" << endl
+				<< "|" << str2 << "|" << endl;
+			cout << endl << "账号   " << strInvestorID << endl
+				<< "|" << str1 << "|" << endl
+				<< "|" << str2 << "|" << endl;
+		}
+
+		//期货合约代码
+		strConstractsName = mapIt->first.second;
+		//固定输出表格样式
+		if (strConstractsName.compare("全部") >= 0)
+		{
+			//bFlag = true;
+			of << "|" << str1 << "|" << endl
+				<< "|" << str2 << "|" << endl;
+
+			cout << "|" << str1 << "|" << endl
+				<< "|" << str2 << "|" << endl;
+		}
+
+		// 统计两种盈亏
+		ffTickByTickClosdProfits = mapIt->second.first;
+		fProFitsLossOFFloating = mapIt->second.second;
+
+		// 输出期货品种名称
+		if (strConstractsName.size() > 3)
+			of << "|  " << left << setw(11) << strConstractsName;
+		else
+			of << "|  " << left << setw(10) << strConstractsName;
+		cout << "|  " << left << setw(10) << strConstractsName;
+
+		//输出平仓盈亏逐笔和浮动盈亏
+		if (ffTickByTickClosdProfits == 0)
+		{
+			of << "|  " << left << setw(18) << str3 << "|  ";
+			cout << "|  " << left << setw(18) << str3 << "|  ";
+		}
+		else
+		{
+
+			of << "|  " << left << setw(18) << ffTickByTickClosdProfits << "|  ";
+			cout << "|  " << left << setw(18) << ffTickByTickClosdProfits << "|  ";
+		}
+		if (fProFitsLossOFFloating == 0)
+		{
+			of << left << setw(18) << str3 << "|" << endl
+				<< "|" << str2 << "|" << endl;
+			cout << left << setw(18) << str3 << "|" << endl
+				<< "|" << str2 << "|" << endl;
+		}
+		else
+		{
+			of << left << setw(18) << fProFitsLossOFFloating << "|" << endl
+				<< "|" << str2 << "|" << endl;
+			cout << left << setw(18) << fProFitsLossOFFloating << "|" << endl
+				<< "|" << str2 << "|" << endl;
+		}
+
+		strFrontInvestorID = strInvestorID;
+		mapIt++;
+
+	}
+
+	of << "|" << str1 << "|" << endl << endl << endl;
+	cout << "|" << str1 << "|" << endl << endl << endl;
+
+	of.close();
+	return 0;
+}
+
+//输入：存储读文件结果的数组mapArr;<string 账户名，string 期货合约代码 ， float 平仓盈亏逐笔统计>
+//      源文件 strFile 计算结果输出文件strResultFile；
+//功能：计算结果写入指定文件 平仓盈亏逐笔.txt
+//输出：0 正常写，-1 异常
+int ElasticityResaultToTXT(map<pair<string, string>, pair<float, string>> mapArr, string strResultFile)
+{
+	ofstream of;
+	of.open(strResultFile, ofstream::app);
+	if (!of.is_open())
+	{
+		cout << "打开" << strResultFile << "文件失败！\n 请关闭其他正在使用该文件的程序" << endl;
+		return -1;
+	}
+	if (mapArr.size() == 0)
+	{
+		return 0;
+	}
+
+	//bool bFlag = false;
+	const string str1 = "---------------------------------";
+	const string str2 = "                                 ";
+	//期货品种按英文字母A - Z顺序排序,
+	map<pair<string, string>, pair<float, string>>::iterator mapIt = mapArr.begin();
+	string strInvestorID = "";
+	string strFrontInvestorID = "";
+	string strConstractsName = "";
+	float fProfits = 0;
+	string strFile = "";
+
+
+	while (mapIt != mapArr.end())
+	{
+		////文件名
+		strFile = mapIt->second.second;
+
+
+		strInvestorID = mapIt->first.first;
+		if (strFrontInvestorID != strInvestorID)
+		{
+			of << endl << strFile << "  统计如下：" << endl;
+			cout << endl << strFile << "  统计如下：" << endl;
+
+			of << endl << "账号   " << strInvestorID << endl
+				<< "|" << str1 << "|" << endl
+				<< "|" << str2 << "|" << endl;
+			cout << endl << "账号   " << strInvestorID << endl
+				<< "|" << str1 << "|" << endl
+				<< "|" << str2 << "|" << endl;
+		}
+
+		strConstractsName = mapIt->first.second;
+		//固定输出表格样式
+		if (strConstractsName.compare("全部") >= 0)
+		{
+			//bFlag = true;
+			of << "|" << str1 << "|" << endl
+				<< "|" << str2 << "|" << endl;
+
+			cout << "|" << str1 << "|" << endl
+				<< "|" << str2 << "|" << endl;
+		}
+
+		fProfits = mapIt->second.first;
+		strFile = mapIt->second.second;
+		// 输出期货品种名称
+		if (strConstractsName.size() > 3)
+			of << "|  " << left << setw(11) << strConstractsName;
+		else
+			of << "|  " << left << setw(10) << strConstractsName;
+		//输出浮动盈亏
+		of << "|  " << left << setw(18) << fProfits << "|" << endl
+			<< "|" << str2 << "|" << endl;
+
+		cout << "|  " << left << setw(10) << strConstractsName
+			<< "|  " << left << setw(18) << fProfits << "|" << endl
+			<< "|" << str2 << "|" << endl;
+
+		strFrontInvestorID = strInvestorID;
+		mapIt++;
+
+	}
+
+	of << "|" << str1 << "|" << endl << endl << endl;
+	cout << "|" << str1 << "|" << endl << endl << endl;
+
+	of.close();
+	return 0;
+}
 
 //输入：map<string,float> 结构的<品种,逐笔盈亏>， 
 //      账户唯一账号 strInvestorID,源文件 strFile 计算结果输出文件strResultFile；
-//      计算结果写入指定文件平仓盈亏逐笔.txt
+//功能：计算结果写入指定文件
 //输出：0 正常写，-1 异常
 int ResaultToTXT(map<string, float> mapArr, string strInvestorID, string strFile, string strResultFile)
 {
@@ -542,14 +812,18 @@ int ResaultToTXT(map<string, float> mapArr, string strInvestorID, string strFile
 		cout << "打开" << strResultFile << "文件失败！\n 请关闭其他正在使用该文件的程序" << endl;
 		return -1;
 	}
+	if (mapArr.size() == 0)
+	{
+		return 0;
+	}
 
 	bool bFlag = false;
 	const string str1 = "---------------------------------";
 	const string str2 = "                                 ";
-	
+
 	//期货品种按英文字母A - Z顺序排序
 	map<string, float>::iterator mapIt = mapArr.begin();
-	string strTemp = strFile.substr(strFile.rfind('\\') + 1, strFile.npos);
+	string strTemp = strFile.substr(strFile.rfind('\\') + 1, strFile.npos);		//文件名
 	of << strTemp << "  统计如下：" << endl;
 	of << endl << "账号   " << strInvestorID << endl
 		<< "|" << str1 << "|" << endl
@@ -568,7 +842,7 @@ int ResaultToTXT(map<string, float> mapArr, string strInvestorID, string strFile
 				<< "|" << str2 << "|" << endl;
 
 			cout << "|" << str1 << "|" << endl
-			<< "|" << str2 << "|" << endl;
+				<< "|" << str2 << "|" << endl;
 		}
 
 		if (mapIt->first.size() > 3)
@@ -730,7 +1004,7 @@ int TransactionCSVFileRead(vector<TRANSACTION>& Trans, string strFile)
 int TickByTickTransactionProfits(vector<TRANSACTION> vTrans, string strFile)
 {
 	map<string, float> mapArr;			//数据集mapArr：统计品种和平仓盈亏逐笔
-	map<string ,float>::iterator mapIt;
+	map<string, float>::iterator mapIt;
 	vector<TRANSACTION>::iterator transIt = vTrans.begin();
 	char* cConstraction = NULL;
 	string str;
@@ -749,11 +1023,11 @@ int TickByTickTransactionProfits(vector<TRANSACTION> vTrans, string strFile)
 
 		//取得取货合约
 		cConstraction = transIt->GetFuturesConstractsName();
-		
+
 		//取得期货平仓逐笔盈亏
 		fProfits = transIt->GetTickByTickClosdProfits();
 
-		for (i = 0; cConstraction[i] != '\0' ; i++)
+		for (i = 0; cConstraction[i] != '\0'; i++)
 		{
 			//将期货合约统一为大写字母表示
 			if (cConstraction[i] >= 97 && cConstraction[i] <= 122)			//97 是小写a ，122是小写z
@@ -761,7 +1035,7 @@ int TickByTickTransactionProfits(vector<TRANSACTION> vTrans, string strFile)
 				//	|| cConstraction[i] >= 65 && cConstraction[i] <= 90)	//65是大写A ， 90是大写Z
 				cConstraction[i] -= 32;										//小写字母转大写字母，
 			}
-			if (cConstraction[i]>57 || cConstraction[i] < 48)				//48是数字0, 57是数字9
+			if (cConstraction[i] > 57 || cConstraction[i] < 48)				//48是数字0, 57是数字9
 			{
 				if (bOption == false && bNumber == false)					//是期货还是期权
 				{
@@ -781,7 +1055,7 @@ int TickByTickTransactionProfits(vector<TRANSACTION> vTrans, string strFile)
 		}
 
 		//记录下单用户账户
-		
+
 
 		//表明期货和期权的合约代码
 		str.clear();
@@ -807,21 +1081,267 @@ int TickByTickTransactionProfits(vector<TRANSACTION> vTrans, string strFile)
 		}
 	}
 
-//	map<string ,string ,float> mapArray
+	//	map<string ,string ,float> mapArray
 	return (ResaultToTXT(mapArr, strInvestorID, strFile, "平仓盈亏逐笔.txt"));
 }
 
+
+//输入： string strFileName文件名,
+//功能： 读取strFileName文件，自适应strFileName中数据的分布顺序、数据列数；
+//输出： 返回存储读文件结果的数组mapArr;<string 账户名，string 期货合约代码 ， float 平仓盈亏逐笔统计,string文件名>
+map<pair<string, string>, pair<float, string>> ElasticityHoldingCSVFileRead(
+	map<pair<string, string>, pair<float, string>>& mapArr,
+	string strFileName)
+{
+	ifstream fileCSV;
+	fileCSV.open(strFileName, ios::in);
+	string strFileTemp = strFileName.substr(strFileName.rfind('\\') + 1, strFileName.npos);
+	if (fileCSV.is_open() == false)
+	{
+		cout << "读取 " << strFileTemp << "   失败。" << endl
+			<< "请保证其他程序不在使用该文件，并关闭本程序再试." << endl;
+		fileCSV.close();
+		return mapArr;
+	}
+
+	string strLine;
+	if (!getline(fileCSV, strLine))			 //读取第一行
+		return mapArr;						//空文件或者无交易记录文件，结束读取
+
+	//解析第一行
+	int iProFitsLossOFFloating = 0;
+	const string strcmp = "浮动盈亏";
+	vector<string> vWord;
+	string strWord;							//分割后的子串
+	stringstream strStreamTemp(strLine);		//字符流
+	while (getline(strStreamTemp, strWord, ','))//以“, ”号字符分割
+	{
+		if (strWord.compare(strcmp) == 0)
+		{
+			break;
+		}
+		iProFitsLossOFFloating++;		//计算CSV "浮动盈亏"在的列数,
+	}
+
+
+	string strInvestorID;					//账户名
+	string strFrontInverstorID;				//用于记录表格中“全部”一行的账户名
+	string strConsTractName;				//期货合约代码
+	float fProFitsLossOFFloating;			//浮动盈亏
+	float fTotalProFitsLossOFFloating = 0;
+	float fTemp = 0;
+	int i = 0;
+	vector<string>::iterator it;
+	map<pair<string, string>, pair<float, string>>::iterator mapIt;
+	pair<string, string> pairTemp;
+
+	//解析成交订单信息的剩余行
+	while (getline(fileCSV, strLine))		//逐行读取
+	{
+		vWord = {};							//初始化
+		fProFitsLossOFFloating = 0;
+		fTotalProFitsLossOFFloating = 0;
+		strStreamTemp = stringstream(strLine);		//字符流
+		while (getline(strStreamTemp, strWord, ','))		//以“, ”号字符分割
+		{
+			vWord.push_back(strWord);
+		}
+
+		//获取期货账号
+		it = vWord.begin();
+		strInvestorID = *it;
+
+
+		//获取期货品种合约代码
+		it = vWord.begin() + 3;
+		strConsTractName = *it;
+		//切割字母和数字；
+		for (i = 0; i < (int)strConsTractName.length(); i++)
+		{
+			if (strConsTractName[i] >= '0'&& strConsTractName[i] <= '9')
+			{
+				break;
+			}
+			//将期货合约统一为大写字母表示
+			if (strConsTractName[i] >= 97 && strConsTractName[i] <= 122)			//97 是小写a ，122是小写z
+			{
+				//	|| cConstraction[i] >= 65 && cConstraction[i] <= 90)			//65是大写A ， 90是大写Z
+				strConsTractName[i] -= 32;											//小写字母转大写字母，
+			}
+		}
+		strConsTractName = strConsTractName.substr(0, i);		//从字符串0位置开始，截取非数字的期货合约代码
+
+		//获取期货浮动盈亏
+		it = vWord.begin() + iProFitsLossOFFloating;
+		if (*it == "--")
+			fProFitsLossOFFloating = 0;
+		else
+			fProFitsLossOFFloating = stof(it->c_str());
+
+		//计算全部持仓盈亏
+		fTotalProFitsLossOFFloating += fProFitsLossOFFloating;
+
+		//组队并记入
+		fTemp = 0;
+
+		//先查找有没有这种品种的交易记录
+		pairTemp.first = strInvestorID;
+		pairTemp.second = strConsTractName;
+		mapIt = mapArr.find(pairTemp);
+		if (mapIt != mapArr.end())
+		{
+			//如果已经有这个品种，只需要在这个品种的浮动盈亏上加减后续盈亏
+			fTemp = mapIt->second.first;
+			fTemp += fProFitsLossOFFloating;
+			mapIt->second.first = fTemp;
+		}
+		else
+		{
+			//如果没有这个品种，新开一个品种和盈亏
+			mapArr.insert(make_pair(pairTemp, make_pair(fProFitsLossOFFloating, strFileTemp)));
+		}
+		strFrontInverstorID = *vWord.begin();				//记录上一行的投资者账户
+	}
+
+	cout << strFileTemp << " 文件读取完毕！ " << endl;
+	fileCSV.close();
+
+	// return (ElasticityResaultToTXT(mapArr, strFileName, "平仓盈亏逐笔.txt"));
+	return mapArr;
+}
+
+
+//输入： string strFileName文件名,
+//功能： 读取strFileName文件，自适应strFileName中数据的分布顺序、数据列数；
+//输出： 返回存储读文件结果的数组mapArr;<string 账户名，string 期货合约代码 ， float 平仓盈亏逐笔统计,string文件名>
+map<pair<string, string>, pair<float, string>> ElasticityTransactionCSVFileRead(
+	map<pair<string, string>, pair<float, string>>& mapArr,
+	string strFileName)
+{
+	ifstream fileCSV;
+	fileCSV.open(strFileName, ios::in);
+	string strFileTemp = strFileName.substr(strFileName.rfind('\\') + 1, strFileName.npos);
+	if (fileCSV.is_open() == false)
+	{
+		cout << "读取 " << strFileTemp << "   失败。" << endl
+			<< "请保证其他程序不在使用该文件，并关闭本程序再试." << endl;
+		fileCSV.close();
+		return mapArr;
+	}
+
+	string strLine;
+	if (!getline(fileCSV, strLine))			 //读取第一行
+		return mapArr;						//空文件或者无交易记录文件，结束读取
+
+	//解析第一行
+	int iTickByTickClosdProfits = 0;
+	const string strcmp = "平仓盈亏(逐笔)";
+	vector<string> vWord;
+	string strWord;							//分割后的子串
+	stringstream strStreamTemp(strLine);		//字符流
+	while (getline(strStreamTemp, strWord, ','))//以“, ”号字符分割
+	{
+		if (strWord.compare(strcmp) == 0)
+		{
+			break;
+		}
+		iTickByTickClosdProfits++;		//计算CSV "平仓盈亏(逐笔)"在的列数,
+	}
+
+	string strInvestorID;					//账户名
+	string strInverstorIDTotal;				//用于记录表格中“全部”一行的账户名
+	string strConsTractName;				//期货合约代码
+	float fTickByTickClosdProfits;			//平仓盈亏逐笔
+	float fTemp = 0;
+	int i = 0;
+	vector<string>::iterator it;
+	map<pair<string, string>, pair<float, string>>::iterator mapIt;
+	pair<string, string> pairTemp;
+	//解析成交订单信息的剩余行
+	while (getline(fileCSV, strLine))		//逐行读取
+	{
+		vWord = {};							//初始化
+		fTickByTickClosdProfits = 0;
+		strStreamTemp = stringstream(strLine);		//字符流
+		while (getline(strStreamTemp, strWord, ','))		//以“, ”号字符分割
+		{
+			vWord.push_back(strWord);
+		}
+
+		//获取期货账号
+		it = vWord.begin();
+		strInvestorID = *it;
+		if (strInvestorID.compare("全部") >= 0)
+		{
+			strInvestorID = strInverstorIDTotal;
+		}
+
+		//获取期货品种合约代码
+		it = vWord.begin() + 2;
+		strConsTractName = *it;
+		//切割字母和数字；
+		for (i = 0; i < (int)strConsTractName.length(); i++)
+		{
+			if (strConsTractName[i] >= '0'&& strConsTractName[i] <= '9')
+			{
+				break;
+			}
+			//将期货合约统一为大写字母表示
+			if (strConsTractName[i] >= 97 && strConsTractName[i] <= 122)			//97 是小写a ，122是小写z
+			{
+				//	|| cConstraction[i] >= 65 && cConstraction[i] <= 90)			//65是大写A ， 90是大写Z
+				strConsTractName[i] -= 32;											//小写字母转大写字母，
+			}
+		}
+		strConsTractName = strConsTractName.substr(0, i);		//从字符串0位置开始，截取非数字的期货合约代码
+
+		//获取期货平仓盈亏逐笔
+		it = vWord.begin() + iTickByTickClosdProfits;
+		if (*it == "--")
+			fTickByTickClosdProfits = 0;
+		else
+			fTickByTickClosdProfits = stof(it->c_str());
+
+		//组队并记入
+		fTemp = 0;
+
+		//先查找有没有这种品种的交易记录
+		pairTemp.first = strInvestorID;
+		pairTemp.second = strConsTractName;
+		mapIt = mapArr.find(pairTemp);
+		if (mapIt != mapArr.end())
+		{
+			//如果已经有这个品种，只需要在这个品种的逐笔盈亏上加减后续盈亏
+			//获取tuple的float元素
+			fTemp = mapIt->second.first;
+			fTemp += fTickByTickClosdProfits;
+			mapIt->second.first = fTemp;
+		}
+		else
+		{
+			//如果没有这个品种，新开一个品种和盈亏
+			mapArr.insert(make_pair(pairTemp, make_pair(fTickByTickClosdProfits, strFileTemp)));
+		}
+		strInverstorIDTotal = *vWord.begin();				//记录上一行的投资者账户
+	}
+
+	cout << strFileTemp << " 文件读取完毕！ " << endl;
+	fileCSV.close();
+
+	// return (ElasticityResaultToTXT(mapArr, strFileName, "平仓盈亏逐笔.txt"));
+	return mapArr;
+}
 
 
 
 // 程序版权 、责任声明
 void Notification()
 {
-	cout << "************************************************************" << endl << endl
+	cout << "\n************************************************************" << endl << endl
 		<< " 本软件为非盈利性程序，代码开源，公开版权，遵守Apache Lience\\BSD规范，仅供学习参考。" << endl
 		<< " 开发人员 Sam Smith ，" << endl
 		<< " email :sam-nuaa@nuaa.edu.cn" << endl
-		<< " github仓库：https://github.com/SamSmithchina/qingsuan.git" << endl
+		<< " github仓库：https://github.com/SamSmithchina/qingsuan.git" << endl << endl
 		<< " 使用说明：" << endl
 		<< " 1.交易员请在无限易中将“实时持仓”、“成交汇总”两栏文件导出到本地，" << endl
 		<< "   文件名为 名字+时间+序号.scv" << endl
@@ -830,8 +1350,8 @@ void Notification()
 		<< " 2.数据文件保存或者拷贝到“日结清算.exe”所在目录下，" << endl
 		<< " 3.点击“日结清算.exe”程序，" << endl
 		<< " 4.程序只计算今天日期文件，请定期清除旧日期文件，" << endl
-		<< " 5.程序根据“持仓浮动盈亏”、“平仓逐笔盈亏”，自动完成清算，请按任意键退出程序，" << endl
-		<< " 6.目录下生成清算结果“持仓浮动盈亏.txt”、“平仓逐笔盈亏.txt”。" << endl << endl
+		<< " 5.程序根据“实时持仓”表格的“浮动盈亏”、“成交汇总”表格的“平仓逐笔盈亏”，自动完成清算，请按任意键后按回车键确认，退出程序，" << endl
+		<< " 6.目录下生成清算结果“平仓盈亏逐笔和浮动盈亏.txt”。" << endl << endl
 		<< " 7.当本程序运行异常，请关闭程序，关闭相关文件，然后重启程序" << endl << endl
 		<< "************************************************************" << endl
 		<< endl << endl << endl << endl << endl;
@@ -841,18 +1361,18 @@ void Notification()
 	hFile = _findfirst("日结清算 使用说明.txt", &fileinfo);
 	if (hFile == -1)				//不存在使用说明文件
 	{
-		ofstream of("日结清算 使用说明.txt" );
+		ofstream of("日结清算 使用说明.txt");
 		if (of.is_open())
 		{
 			cout << "当本程序运行异常，请关闭程序，关闭相关文件，然后重启程序" << endl;
 			cout << "Notification error" << endl;
 		}
 
-		of << "************************************************************" << endl << endl
+		of << "\n************************************************************" << endl << endl
 			<< " 本软件为非盈利性程序，代码开源，公开版权，遵守Apache Lience\\BSD规范，仅供学习参考。" << endl
 			<< " 开发人员 Sam Smith ，" << endl
 			<< " email :sam-nuaa@nuaa.edu.cn" << endl
-			<< " github仓库：https://github.com/SamSmithchina/qingsuan.git" << endl
+			<< " github仓库：https://github.com/SamSmithchina/qingsuan.git" << endl << endl
 			<< " 使用说明：" << endl
 			<< " 1.交易员请在无限易中将“实时持仓”、“成交汇总”两栏文件导出到本地，" << endl
 			<< "   文件名为 名字+时间+序号.scv" << endl
@@ -861,8 +1381,8 @@ void Notification()
 			<< " 2.数据文件保存或者拷贝到“日结清算.exe”所在目录下，" << endl
 			<< " 3.点击“日结清算.exe”程序，" << endl
 			<< " 4.程序只计算今天日期文件，请定期清除旧日期文件，" << endl
-			<< " 5.程序根据“持仓浮动盈亏”、“平仓逐笔盈亏”，自动完成清算，请按任意键退出程序，" << endl
-			<< " 6.目录下生成清算结果“持仓浮动盈亏.txt”、“平仓逐笔盈亏.txt”。" << endl << endl
+			<< " 5.程序根据“实时持仓”表格的“浮动盈亏”、“成交汇总”表格的“平仓逐笔盈亏”，自动完成清算，请按任意键后按回车键确认，退出程序，" << endl
+			<< " 6.目录下生成清算结果“平仓盈亏逐笔和浮动盈亏.txt”。" << endl << endl
 			<< " 7.当本程序运行异常，请关闭程序，关闭相关文件，然后重启程序" << endl << endl
 			<< "************************************************************" << endl;
 		of.close();
