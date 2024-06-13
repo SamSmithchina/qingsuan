@@ -523,7 +523,7 @@ map<pair<string, string>, pair<float, string>> TotalMapHoling(map<pair<string, s
 		fTemp = itMap->second.first;
 		fTotal += fTemp;
 		//获取下一个指针
-		itMapNext = ++itMap;		
+		itMapNext = ++itMap;
 		itMap--;
 		if (itMapNext == mapHolding.end())
 		{
@@ -616,7 +616,10 @@ int ElasticityTotalResaultToTXT(
 	//bool bFlag = false;
 	const string str1 = "------------------------------------------------------";
 	const string str2 = "                                                      ";
-	string str3 = "";
+	const string str3 = "合约代码";
+	const string str4 = "平仓盈亏逐笔";
+	const string str5 = "持仓盈亏";
+	string str6 = "";
 	//期货品种按英文字母A - Z顺序排序,
 	map<pair<string, string>, pair<float, float>>::iterator mapIt = mergeMap.begin();
 	string strInvestorID = "";
@@ -638,13 +641,19 @@ int ElasticityTotalResaultToTXT(
 			of << endl << strFile << "  统计如下：" << endl;
 			cout << endl << strFile << "  统计如下：" << endl;
 			*/
-
+			//固定输出表格样式
 			of << endl << "账号   " << strInvestorID << endl
 				<< "|" << str1 << "|" << endl
-				<< "|" << str2 << "|" << endl;
+				<< "|  " << left << setw(10) << str3
+				<< "|  " << left << setw(18) << str4
+				<< "|  " << left << setw(18) << str5 << "|" << endl
+				<< "|" << str1 << "|" << endl;
 			cout << endl << "账号   " << strInvestorID << endl
 				<< "|" << str1 << "|" << endl
-				<< "|" << str2 << "|" << endl;
+				<< "|  " << left << setw(10) << str3
+				<< "|  " << left << setw(18) << str4
+				<< "|  " << left << setw(18) << str5 << "|" << endl
+				<< "|" << str1 << "|" << endl;
 		}
 
 		//期货合约代码
@@ -674,8 +683,8 @@ int ElasticityTotalResaultToTXT(
 		//输出平仓盈亏逐笔和浮动盈亏
 		if (ffTickByTickClosdProfits == 0)
 		{
-			of << "|  " << left << setw(18) << str3 << "|  ";
-			cout << "|  " << left << setw(18) << str3 << "|  ";
+			of << "|  " << left << setw(18) << str6 << "|  ";
+			cout << "|  " << left << setw(18) << str6 << "|  ";
 		}
 		else
 		{
@@ -685,9 +694,9 @@ int ElasticityTotalResaultToTXT(
 		}
 		if (fProFitsLossOFFloating == 0)
 		{
-			of << left << setw(18) << str3 << "|" << endl
+			of << left << setw(18) << str6 << "|" << endl
 				<< "|" << str2 << "|" << endl;
-			cout << left << setw(18) << str3 << "|" << endl
+			cout << left << setw(18) << str6 << "|" << endl
 				<< "|" << str2 << "|" << endl;
 		}
 		else
@@ -704,7 +713,8 @@ int ElasticityTotalResaultToTXT(
 	}
 
 	of << "|" << str1 << "|" << endl << endl << endl;
-	cout << "|" << str1 << "|" << endl << endl << endl;
+	cout << "|" << str1 << "|" << endl << endl << endl
+		<< "统计结果保存在 : " << strResultFile << endl << endl << endl;
 
 	of.close();
 	return 0;
@@ -1109,20 +1119,30 @@ map<pair<string, string>, pair<float, string>> ElasticityHoldingCSVFileRead(
 		return mapArr;						//空文件或者无交易记录文件，结束读取
 
 	//解析第一行
+	int iInvestorID = 0;
+	int iFuturesConstracts = 0;
 	int iProFitsLossOFFloating = 0;
-	const string strcmp = "浮动盈亏";
+	int i = 0;
 	vector<string> vWord;
 	string strWord;							//分割后的子串
 	stringstream strStreamTemp(strLine);		//字符流
+	i = 0;
 	while (getline(strStreamTemp, strWord, ','))//以“, ”号字符分割
 	{
-		if (strWord.compare(strcmp) == 0)
+		if (strWord.compare("投资者账号") == 0)
 		{
-			break;
+			iInvestorID = i;					//期货账户所在列数
 		}
-		iProFitsLossOFFloating++;		//计算CSV "浮动盈亏"在的列数,
+		if (strWord.compare("合约代码") == 0)
+		{
+			iFuturesConstracts = i;				//合约代码所在列数
+		}
+		if (strWord.compare("浮动盈亏") == 0)
+		{
+			iProFitsLossOFFloating = i;		//计算CSV "平仓盈亏(逐笔)"在的列数,
+		}
+		i++;
 	}
-
 
 	string strInvestorID;					//账户名
 	string strFrontInverstorID;				//用于记录表格中“全部”一行的账户名
@@ -1130,7 +1150,6 @@ map<pair<string, string>, pair<float, string>> ElasticityHoldingCSVFileRead(
 	float fProFitsLossOFFloating;			//浮动盈亏
 	float fTotalProFitsLossOFFloating = 0;
 	float fTemp = 0;
-	int i = 0;
 	vector<string>::iterator it;
 	map<pair<string, string>, pair<float, string>>::iterator mapIt;
 	pair<string, string> pairTemp;
@@ -1148,12 +1167,12 @@ map<pair<string, string>, pair<float, string>> ElasticityHoldingCSVFileRead(
 		}
 
 		//获取期货账号
-		it = vWord.begin();
+		it = vWord.begin() + iInvestorID;
 		strInvestorID = *it;
 
 
 		//获取期货品种合约代码
-		it = vWord.begin() + 3;
+		it = vWord.begin() + iFuturesConstracts;
 		strConsTractName = *it;
 		//切割字母和数字；
 		for (i = 0; i < (int)strConsTractName.length(); i++)
@@ -1234,18 +1253,30 @@ map<pair<string, string>, pair<float, string>> ElasticityTransactionCSVFileRead(
 		return mapArr;						//空文件或者无交易记录文件，结束读取
 
 	//解析第一行
+	int iInvestorID = 0;
+	int iFuturesConstracts = 0;
 	int iTickByTickClosdProfits = 0;
-	const string strcmp = "平仓盈亏(逐笔)";
+	int i = 0;
 	vector<string> vWord;
 	string strWord;							//分割后的子串
 	stringstream strStreamTemp(strLine);		//字符流
+	i = 0;
 	while (getline(strStreamTemp, strWord, ','))//以“, ”号字符分割
 	{
-		if (strWord.compare(strcmp) == 0)
+
+		if (strWord.compare("投资者账号") == 0)
 		{
-			break;
+			iInvestorID = i;					//期货账户所在列数
 		}
-		iTickByTickClosdProfits++;		//计算CSV "平仓盈亏(逐笔)"在的列数,
+		if (strWord.compare("合约代码") == 0)
+		{
+			iFuturesConstracts = i;				//合约代码所在列数
+		}
+		if (strWord.compare("平仓盈亏(逐笔)") == 0)
+		{
+			iTickByTickClosdProfits = i;		//计算CSV "平仓盈亏(逐笔)"在的列数,
+		}
+		i++;
 	}
 
 	string strInvestorID;					//账户名
@@ -1253,10 +1284,10 @@ map<pair<string, string>, pair<float, string>> ElasticityTransactionCSVFileRead(
 	string strConsTractName;				//期货合约代码
 	float fTickByTickClosdProfits;			//平仓盈亏逐笔
 	float fTemp = 0;
-	int i = 0;
 	vector<string>::iterator it;
 	map<pair<string, string>, pair<float, string>>::iterator mapIt;
 	pair<string, string> pairTemp;
+
 	//解析成交订单信息的剩余行
 	while (getline(fileCSV, strLine))		//逐行读取
 	{
@@ -1269,7 +1300,7 @@ map<pair<string, string>, pair<float, string>> ElasticityTransactionCSVFileRead(
 		}
 
 		//获取期货账号
-		it = vWord.begin();
+		it = vWord.begin() + iInvestorID;
 		strInvestorID = *it;
 		if (strInvestorID.compare("全部") >= 0)
 		{
@@ -1277,7 +1308,7 @@ map<pair<string, string>, pair<float, string>> ElasticityTransactionCSVFileRead(
 		}
 
 		//获取期货品种合约代码
-		it = vWord.begin() + 2;
+		it = vWord.begin() + iFuturesConstracts;
 		strConsTractName = *it;
 		//切割字母和数字；
 		for (i = 0; i < (int)strConsTractName.length(); i++)
